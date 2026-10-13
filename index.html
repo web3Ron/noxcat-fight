@@ -18,7 +18,13 @@
    The player who opens a room becomes the hub: every guest sends its presence to the hub,
    and the hub relays everyone's presence to everyone as soon as it changes (at most ~30 times a second).
    The data channel is UNORDERED: a late packet never holds back newer ones, and stale ones are dropped by sequence number.
-   Invite links look like  https://your-site/?r=AB12C  */
+   Invite links look like  https://your-site/?r=AB12C  — or a friend can type the 5-letter room code.
+
+   Robustness (the public PeerJS signalling server and phone browsers are flaky):
+   - host: if the signalling socket drops (phone switched apps, Wi-Fi blip) it reconnects with the SAME room code;
+     players already in the room stay connected because game data flows player-to-player.
+   - guest: "room not found" is retried for ~25 s (the host may be in another app pasting the link),
+     a connection that never opens is abandoned after 12 s and retried, and a dropped connection rejoins by itself. */
 (function(){
   if (window.claude && typeof window.claude.use === 'function') return; // running inside claude.ai: use the platform room
   if (typeof Peer !== 'function') return;                                 // PeerJS failed to load: single player only
@@ -26,22 +32,31 @@
   var PEER_OPTS = Object.assign({debug:0, config:{iceServers:[
     {urls:'stun:stun.l.google.com:19302'},
     {urls:'stun:stun.cloudflare.com:3478'},
-    {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'], username:'peerjs', credential:'peerjsp'}
+    {urls:['turn:eu-0.turn.peerjs.com:3478','turn:us-0.turn.peerjs.com:3478'], username:'peerjs', credential:'peerjsp'},
+    {urls:['turn:openrelay.metered.ca:80','turn:openrelay.metered.ca:443','turn:openrelay.metered.ca:443?transport=tcp'], username:'openrelayproject', credential:'openrelayproject'}
   ]}}, window.NOX_PEER_OPTS || {});
+  var T_SIGNAL = window.NOX_T_SIGNAL || 10000, T_CONN = window.NOX_T_CONN || 12000, MAX_NOTFOUND = 8, MAX_FAIL = 3;
   var qs = new URLSearchParams(location.search);
-  var code = (qs.get('r') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+  var cleanCode = function(s){ return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); };
+  var code = cleanCode(qs.get('r'));
   var myLabel = 'p' + Math.random().toString(36).slice(2, 10);
   var mine = {}, meObj = null, cache = null;
   var others = new Map();            // label -> {str, pres, obj}
   var subs = [], csubs = [], connected = false;
-  var peer = null, hubConn = null, conns = new Map(), isHub = false;
+  var peer = null, hubConn = null, conns = new Map(), isHub = false, hubEver = false, hubIdTries = 0;
   var seqOut = 0, seqIn = 0, dirty = false, flushT = null, lastFlush = 0;
+  var gTimer = null, nfTries = 0, failTries = 0, hubTimer = null, hubLoop = null, guestLoop = null;
   var rtts = {};                     // label -> round trip ms
-  var api = { status: code ? 'joining' : 'idle', code: code, route: '', rtt: null,
+  var api = { status: code ? 'joining' : 'idle', code: code, route: '', rtt: null, attempt: 0, error: '',
     shareUrl: function(){ return location.origin + location.pathname + '?r=' + code; },
-    rttOf: function(label){ return rtts[label] == null ? null : rtts[label]; } };
+    rttOf: function(label){ return rtts[label] == null ? null : rtts[label]; },
+    join: function(c){ c = cleanCode(c); if (!c || isHub) return false; code = c; api.code = c;
+      try{ history.replaceState(null, '', location.pathname + '?r=' + c); }catch(e){}
+      nfTries = 0; failTries = 0; kill(peer); peer = null; hubConn = null; join(); return true; },
+    retry: function(){ if (isHub) { hubIdTries = 0; hubPeer(); } else if (code) { nfTries = 0; failTries = 0; join(); } } };
   window.NOX_P2P = api;
   var now = function(){ return performance.now(); };
+  function setStatus(s){ api.status = s; }
 
   function mk(label, pres, me){ return Object.freeze({peer:label, by:null, isMe:me, sameTab:me, kind:'viewer', guest:false, presence:pres, updatedAt:Date.now()}); }
   meObj = mk(myLabel, Object.freeze({}), true);
@@ -65,6 +80,7 @@
     if (changed) rebuild();
   }
   function parse(d){ try{ return typeof d === 'string' ? JSON.parse(d) : d; }catch(e){ return null; } }
+  function kill(p){ if (!p) return; try{ p.destroy(); }catch(e){} }
 
   // Which route did WebRTC pick?  direct = player to player, relay = through a TURN server (slower)
   function detectRoute(pc, cb){
@@ -100,33 +116,62 @@
       try{ c.send(JSON.stringify({t:'all', s:seqOut, all:all})); }catch(e){}
     });
   }
+  function onGuestConn(c){
+    c._s = 0;
+    c.on('open', function(){ conns.set(c.connectionId || c.peer, c); markDirty(); });
+    c.on('data', function(d){
+      var m = parse(d); if (!m) return;
+      if (m.t === 'p' && typeof m.label === 'string') {
+        if (typeof m.s === 'number') { if (m.s <= c._s) return; c._s = m.s; }  // drop stale (out of order) updates
+        c._label = m.label; if (upsert(m.label, m.presence)) { rebuild(); markDirty(); }
+      } else if (m.t === 'ping') { try{ c.send(JSON.stringify({t:'pong', c:m.c})); }catch(e){} }
+      else if (m.t === 'pong' && c._label) { rtts[c._label] = Math.round(now() - m.c); }
+    });
+    var gone = function(){ if (!conns.delete(c.connectionId || c.peer)) return;
+      if (c._label) { delete rtts[c._label]; if (others.delete(c._label)) { rebuild(); markDirty(); } } };
+    c.on('close', gone); c.on('error', gone);
+  }
+  function newCode(){ return Math.random().toString(36).slice(2, 7).toUpperCase(); }
+  // (re)register the room code with the signalling server; players already connected are kept
+  function hubPeer(){
+    clearTimeout(hubTimer); if (!isHub) return;
+    if (peer && !peer.destroyed && hubEver && peer.disconnected) {    // same peer, only the signalling socket dropped
+      var q = peer; setStatus('reconnecting'); try{ q.reconnect(); }catch(e){}
+      hubTimer = setTimeout(function(){ if (isHub && peer === q && !q.open) { kill(q); peer = null; hubPeer(); } }, T_SIGNAL);
+      return;
+    }
+    if (peer && !peer.destroyed && peer.open) return;
+    kill(peer);
+    var p = peer = new Peer(PREFIX + code, PEER_OPTS);
+    setStatus(hubEver ? 'reconnecting' : 'connecting');
+    hubTimer = setTimeout(function(){ if (peer === p && !p.open) { kill(p); peer = null; hubPeer(); } }, T_SIGNAL);
+    p.on('open', function(){ if (peer !== p) return; clearTimeout(hubTimer); hubEver = true; hubIdTries = 0; setStatus('hosting'); setConn(true);
+      try{ history.replaceState(null, '', location.pathname + '?r=' + code); }catch(e){} });
+    p.on('disconnected', function(){ if (peer !== p || p.destroyed || !isHub) return; setStatus('reconnecting');
+      clearTimeout(hubTimer); hubTimer = setTimeout(hubPeer, 800); });
+    p.on('error', function(e){
+      if (peer !== p) return; var t = e && e.type; api.error = t || '';
+      if (t === 'peer-unavailable') return;                            // not relevant for the hub
+      clearTimeout(hubTimer);
+      if (t === 'unavailable-id') {
+        // after a drop our own old registration can linger a few seconds: wait for it; a brand-new room simply takes another code
+        kill(p); peer = null;
+        if (hubEver && ++hubIdTries < 6) { setStatus('reconnecting'); hubTimer = setTimeout(hubPeer, 2500); }
+        else { if (!conns.size) { code = newCode(); api.code = code; hubEver = false; } hubIdTries = 0; hubPeer(); }
+        return;
+      }
+      if (!p.open) { kill(p); peer = null; setStatus(hubEver ? 'reconnecting' : 'connecting'); hubTimer = setTimeout(hubPeer, 2500); }
+    });
+    p.on('connection', onGuestConn);
+  }
   function startHub(){
     if (isHub) return;
-    if (peer) { try{ peer.destroy(); }catch(e){} peer = null; hubConn = null; others.clear(); rebuild(); }
-    code = Math.random().toString(36).slice(2, 7).toUpperCase(); api.code = code;
-    isHub = true; api.status = 'connecting';
-    peer = new Peer(PREFIX + code, PEER_OPTS);
-    peer.on('open', function(){ api.status = 'hosting'; setConn(true);
-      try{ history.replaceState(null, '', location.pathname + '?r=' + code); }catch(e){} });
-    peer.on('error', function(e){
-      if (e && e.type === 'unavailable-id') { isHub = false; try{ peer.destroy(); }catch(_){} peer = null; startHub(); return; }
-      api.status = 'error'; api.error = e && e.type;
-    });
-    peer.on('connection', function(c){
-      c._s = 0;
-      c.on('open', function(){ conns.set(c.connectionId || c.peer, c); markDirty(); });
-      c.on('data', function(d){
-        var m = parse(d); if (!m) return;
-        if (m.t === 'p' && typeof m.label === 'string') {
-          if (typeof m.s === 'number') { if (m.s <= c._s) return; c._s = m.s; }  // drop stale (out of order) updates
-          c._label = m.label; if (upsert(m.label, m.presence)) { rebuild(); markDirty(); }
-        } else if (m.t === 'ping') { try{ c.send(JSON.stringify({t:'pong', c:m.c})); }catch(e){} }
-        else if (m.t === 'pong' && c._label) { rtts[c._label] = Math.round(now() - m.c); }
-      });
-      c.on('close', function(){ conns.delete(c.connectionId || c.peer); if (c._label) { delete rtts[c._label]; if (others.delete(c._label)) { rebuild(); markDirty(); } } });
-    });
-    setInterval(function(){                       // keep-alive + latency probe
+    clearTimeout(gTimer); if (peer) { kill(peer); peer = null; hubConn = null; others.clear(); rebuild(); }
+    code = newCode(); api.code = code; isHub = true; hubEver = false;
+    hubPeer();
+    if (!hubLoop) hubLoop = setInterval(function(){                  // keep-alive + latency probe
       if (!isHub) return; markDirty();
+      if (peer && !peer.destroyed && peer.disconnected && api.status === 'hosting') hubPeer();
       conns.forEach(function(c){ if (c.open) { try{ c.send(JSON.stringify({t:'ping', c:now()})); }catch(e){}
         detectRoute(c.peerConnection, function(route){ c._route = route; }); } });
       var anyRelay = false; conns.forEach(function(c){ if (c._route === 'relay') anyRelay = true; });
@@ -136,27 +181,56 @@
 
   // ---- guest ----
   function sendMine(){ if (hubConn && hubConn.open) { try{ hubConn.send(JSON.stringify({t:'p', s:++seqOut, label:myLabel, presence:mine})); }catch(e){} } }
+  function retryJoin(why, delay){
+    clearTimeout(gTimer); if (isHub) return;
+    if (why === 'notfound') nfTries++; else failTries++;
+    if (why === 'notfound' && nfTries >= MAX_NOTFOUND) { kill(peer); peer = null; hubConn = null; setStatus('notfound'); return; }
+    if (why !== 'notfound' && failTries >= MAX_FAIL) { kill(peer); peer = null; hubConn = null; setStatus(why === 'signal' ? 'error' : 'failed'); return; }
+    setStatus('retrying'); gTimer = setTimeout(join, delay);
+  }
   function join(){
-    api.status = 'joining';
-    peer = new Peer(undefined, PEER_OPTS);
-    peer.on('open', function(){
-      hubConn = peer.connect(PREFIX + code, {reliable:false, serialization:'raw'});   // unordered channel
-      hubConn.on('open', function(){ api.status = 'joined'; setConn(true); sendMine(); });
-      hubConn.on('data', function(d){
-        var m = parse(d); if (!m) return;
+    clearTimeout(gTimer); if (isHub || !code) return;
+    api.attempt = nfTries + failTries + 1;
+    setStatus(api.attempt > 1 ? 'retrying' : 'joining');
+    var p = peer;
+    var go = function(){
+      if (peer !== p || isHub) return;
+      var c = hubConn = p.connect(PREFIX + code, {reliable:false, serialization:'raw'});   // unordered channel
+      gTimer = setTimeout(function(){ if (hubConn === c && !c.open) { hubConn = null; try{ c.close(); }catch(e){} retryJoin('ice', 500); } }, T_CONN);
+      c.on('open', function(){ if (hubConn !== c) return; clearTimeout(gTimer); nfTries = 0; failTries = 0; seqIn = 0; setStatus('joined'); setConn(true); sendMine(); });
+      c.on('data', function(d){
+        if (hubConn !== c) return; var m = parse(d); if (!m) return;
         if (m.t === 'all' && m.all) { if (typeof m.s === 'number') { if (m.s <= seqIn) return; seqIn = m.s; } replaceAll(m.all); }
-        else if (m.t === 'ping') { try{ hubConn.send(JSON.stringify({t:'pong', c:m.c})); }catch(e){} }
+        else if (m.t === 'ping') { try{ c.send(JSON.stringify({t:'pong', c:m.c})); }catch(e){} }
         else if (m.t === 'pong') { api.rtt = Math.round(now() - m.c); }
       });
-      hubConn.on('close', function(){ if (isHub) return; api.status = 'lost'; others.clear(); rebuild(); });
+      var lost = function(){ if (hubConn !== c || isHub) return; var was = c.open || api.status === 'joined'; hubConn = null; others.clear(); rebuild();
+        if (was) { setStatus('reconnecting'); clearTimeout(gTimer); gTimer = setTimeout(join, 800); } };
+      c.on('close', lost); c.on('error', lost);
+    };
+    if (p && p.open && !p.destroyed) { go(); return; }               // signalling still fine: just dial the host again
+    kill(p); hubConn = null;
+    p = peer = new Peer(undefined, PEER_OPTS);
+    gTimer = setTimeout(function(){ if (peer === p && !p.open) retryJoin('signal', 500); }, T_SIGNAL);
+    p.on('open', function(){ if (peer !== p) return; clearTimeout(gTimer); go(); });
+    p.on('disconnected', function(){ if (peer === p && !p.destroyed) { try{ p.reconnect(); }catch(e){} } });
+    p.on('error', function(e){
+      if (peer !== p || isHub) return; var t = e && e.type; api.error = t || '';
+      if (t === 'peer-unavailable') { hubConn = null; retryJoin('notfound', 2800); }
+      else if (!p.open) retryJoin('signal', 1500);
     });
-    peer.on('error', function(e){ if (isHub) return; api.status = (e && e.type === 'peer-unavailable') ? 'notfound' : 'error'; api.error = e && e.type; });
-    setInterval(function(){
+    if (!guestLoop) guestLoop = setInterval(function(){
       if (isHub || !hubConn || !hubConn.open) return;
       try{ hubConn.send(JSON.stringify({t:'ping', c:now()})); }catch(e){}
       detectRoute(hubConn.peerConnection, function(route){ api.route = route; });
     }, 1500);
   }
+  // phone browsers freeze background tabs: when the page comes back, repair whatever dropped
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden) return;
+    if (isHub) { if (!peer || peer.destroyed || peer.disconnected) hubPeer(); }
+    else if (code && (!hubConn || !hubConn.open) && api.status !== 'joining' && api.status !== 'retrying') { nfTries = 0; failTries = 0; join(); }
+  });
 
   var room = {
     presence: function(patch){
@@ -318,7 +392,7 @@ h1 em{font-style:normal;color:var(--lime)}
 .nick{display:flex;align-items:center;gap:10px;font:400 15px var(--f-dot);color:var(--muted);flex-wrap:wrap}
 .nick input{font:400 16px var(--f-dot);color:var(--ink);background:var(--void);border:2px solid var(--line);padding:8px 10px;min-width:0;width:12em;max-width:100%}
 .nick input:focus{outline:none;border-color:var(--lime)}
-.invite{display:flex;gap:10px;flex-wrap:wrap}
+.invite{display:flex;gap:10px;flex-wrap:wrap}.invite.joincode{margin-top:10px;width:100%}.invite.joincode input{letter-spacing:.3em;text-transform:uppercase;max-width:220px}.rcode{font:400 24px var(--f-num);color:var(--gold);letter-spacing:.15em}
 .invite input{flex:1;min-width:0;font:400 14px var(--f-pixel);color:var(--lime);background:var(--void);border:2px solid var(--line);padding:10px}
 .zones{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .zonec{padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0;box-shadow:inset 0 3px 0 var(--zc),inset 0 0 0 2px var(--line),4px 4px 0 var(--shadow)}
@@ -1955,6 +2029,9 @@ function frame(now){
   else if(state==='dying'){tAll+=dt;dieT-=dt;updateFx(dt*0.5);shake=Math.max(0,shake-dt);if(dieT<=0){state='over';setHud(false);showOver(false);}}
   else tAll+=dt*0.5;
   render();hud(dt);musicUpdate();
+  {const X=window.NOX_P2P;if(X){const k=X.status+'|'+X.attempt+'|'+X.code;if(k!==NET.p2pK){NET.p2pK=k;lobbyDirty=true;}
+    // opened an invite link (or typed a code): join that host by itself once it shows up
+    if(state==='title'&&!NET.role&&X.status==='joined'&&NET.autoJoin!==false&&NET.room){const hs=noxPeers().filter(p=>!(p.isMe&&p.sameTab)&&p.presence.host&&['lobby','play','shop'].includes(p.presence.ph));if(hs.length===1){NET.autoJoin=false;joinRoom(hs[0].peer);}}}}
   lobbyT-=dt;if(lobbyT<=0&&state==='title'&&lobbyDirty){lobbyT=0.25;lobbyDirty=false;renderLobby();}
   goT-=dt;if(goT<=0&&state==='between'&&isMP()&&!$('#shop').hidden){goT=0.4;renderGo();}
   if(state==='title'&&NET.room)lobbyDirty=true;
@@ -2016,20 +2093,31 @@ function renderLobby(){
     let actions='',note='';
     if(NET.role==='host'){const n=participants().length;actions=`<button class="btn big" data-act="startmp">開始對戰（${n+1} 人）</button><button class="btn ghost" data-act="leave">解散房間</button>`;
       note=n?'隊友到齊就按開始。中途也能加入。':'房間開好了。把這個頁面分享給朋友，他們打開同一個連結就會看到「加入」。';
-      const X=window.NOX_P2P;if(X){note=X.status==='hosting'?`把這個邀請連結傳給朋友，他們打開就能加入（最多 4 人）：</p><div class="invite"><input id="inviteUrl" readonly value="${esc(X.shareUrl())}"><button class="btn" data-act="copylink">複製連結</button></div><p class="hint">${n?'隊友到齊就按開始。':'等朋友加入…'}`:'正在建立房間…';}}
+      const X=window.NOX_P2P;if(X){note=X.status==='hosting'?`房號 <b class="rcode">${esc(X.code)}</b>　把邀請連結傳給朋友，或讓他在大廳輸入房號（最多 4 人）：</p><div class="invite"><input id="inviteUrl" readonly value="${esc(X.shareUrl())}"><button class="btn" data-act="copylink">複製連結</button></div><p class="hint">${n?'隊友到齊就按開始。':'等朋友加入…'}<br>傳連結時遊戲會被切到背景，傳完記得回到這個頁面，朋友才連得進來。`:X.status==='reconnecting'?`房號 <b class="rcode">${esc(X.code)}</b>　連線服務斷了一下，正在用同一個房號重新連線…（已經在房間裡的隊友不受影響）`:'正在建立房間…（連線服務比較慢時要 5～10 秒）';}}
     else if(NET.role==='client'){const h=peerOf(NET.hostPeer);actions=`<button class="btn ghost" data-act="leave">離開房間</button>`;note=h?`已加入 ${esc(nameOf(h))} 的房間，等房主按開始。難度由房主決定：${DIF().name}。`:'正在找房主…';}
     else{
       actions=hosts.map(h=>{const full=noxPeers().filter(q=>q.presence.join===h.peer&&q.presence.ep===h.presence.ep).length>=3;return `<button class="btn" data-act="join" data-peer="${esc(h.peer)}"${full?' disabled':''}>${full?'房間已滿':`加入 ${esc(nameOf(h))} 的房間`}</button>`;}).join('')+
         `<button class="btn${hosts.length?' ghost':''}" data-act="host">開房間</button>`;
       note=hosts.length?'有人開了房間，按「加入」就能一起打。':'開一個房間，再把這個頁面的連結分享給朋友（右上角「分享」）。朋友打開同一個連結就能加入。';
-      const X=window.NOX_P2P;if(X&&!hosts.length){note=X.status==='joining'?'正在連到朋友的房間…':X.status==='notfound'?'找不到這個房間，可能房主已經離開。你可以自己開一個新房間。':X.status==='lost'?'和房主的連線中斷了。可以重新整理再試一次，或自己開房間。':X.status==='error'?'連線服務暫時無法使用，先玩單人吧。':'按「開房間」會產生一條邀請連結，傳給朋友就能一起打。';}
+      const X=window.NOX_P2P;if(X&&!hosts.length){const rc=esc(X.code||'');
+        note=X.status==='joining'?`正在連到房間 <b class="rcode">${rc}</b>…`
+          :X.status==='retrying'?`正在連到房間 <b class="rcode">${rc}</b>…（第 ${X.attempt} 次嘗試）<br>如果房主剛好切到別的 App（例如去 LINE 貼連結），請他回到遊戲頁面，這邊會自動接上。`
+          :X.status==='reconnecting'?'和房主的連線斷了，正在自動重新連線…'
+          :X.status==='joined'?'已連上房主，正在載入房間…'
+          :X.status==='notfound'?`找不到房間 <b class="rcode">${rc}</b>。房主可能已經關掉頁面，或手機把遊戲放到背景太久。請房主回到遊戲頁面後按「重試」，或請他重開一個房間。`
+          :X.status==='failed'?'找得到房間，但連不上房主。通常是網路擋住了點對點連線（公司、學校 Wi‑Fi 或部分行動網路），換個網路或改用手機熱點再按「重試」。'
+          :X.status==='error'?'連不上連線服務（可能是網路不穩或服務暫時忙碌）。稍等一下再按「重試」，或先玩單人。'
+          :'按「開房間」會產生房號和邀請連結；朋友打開連結，或在這裡輸入房號就能一起打。';
+        if(['notfound','failed','error'].includes(X.status))actions=`<button class="btn" data-act="p2pretry">重試</button>`+actions;
+        if(!['joining','retrying','reconnecting','joined'].includes(X.status))actions+=`</div><div class="invite joincode"><input id="roomCode" maxlength="5" placeholder="輸入房號" autocomplete="off" autocapitalize="characters" spellcheck="false"><button class="btn ghost" data-act="joincode">用房號加入</button>`;}
     }
-    html=`<div class="lobby-h"><h3>和朋友一起打</h3><span class="net${NET.conn?' on':''}"><i></i>${NET.conn?'ONLINE · '+ps.length:'CONNECTING'}</span></div>
+    html=`<div class="lobby-h"><h3>和朋友一起打</h3><span class="net${NET.conn&&!(window.NOX_P2P&&['joining','retrying','reconnecting','connecting'].includes(window.NOX_P2P.status))?' on':''}"><i></i>${(()=>{const X=window.NOX_P2P,busy=X&&['joining','retrying','reconnecting','connecting'].includes(X.status);return NET.conn&&!busy?'ONLINE · '+ps.length:'CONNECTING'+(X&&X.attempt>1&&busy?' · '+X.attempt:'');})()}</span></div>
       <ul class="plist">${rows||'<li><span class="who">還沒有其他人</span></li>'}</ul><p class="hint">${note}</p>${isMP()?`<p class="hint teamn">${teamNote(1+participants().length)||'組隊時敵人會依人數變強，每人拿到的爪幣和經驗會變少。'}</p>`:''}<div class="row">${actions}</div>`;
   }
   if(html!==NET.lobbyHtml){NET.lobbyHtml=html;el.innerHTML=html;}
 }
-$('#title').addEventListener('input',e=>{if(e.target.id!=='nick')return;const v=e.target.value.trim().slice(0,12);if(v){nick=v;try{localStorage.setItem('noxcat_nick',nick);}catch(_){}pushPresence(true);lobbyDirty=true;}});
+$('#title').addEventListener('keydown',e=>{if(e.target.id==='roomCode'&&e.key==='Enter'){const b=document.querySelector('[data-act=joincode]');if(b)b.click();}});
+$('#title').addEventListener('input',e=>{if(e.target.id==='roomCode'){e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');return;}if(e.target.id!=='nick')return;const v=e.target.value.trim().slice(0,12);if(v){nick=v;try{localStorage.setItem('noxcat_nick',nick);}catch(_){}pushPresence(true);lobbyDirty=true;}});
 $('#title').addEventListener('click',e=>{
   const c=e.target.closest('.char');if(c){charId=c.dataset.c;P=newP(charId);document.querySelectorAll('.char').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.c===charId)));paintPx($('#heroCat'),CATS[charId]);pushPresence(true);lobbyDirty=true;return;}
   const dv=e.target.closest('[data-dif]');if(dv){difId=dv.dataset.dif;try{localStorage.setItem('noxcat_dif',difId);}catch(_){}renderTitle();pushPresence(true);return;}
@@ -2038,6 +2126,8 @@ $('#title').addEventListener('click',e=>{
   if(act==='music'){toggleMusic();return;}
   if(act==='copylink'){const i=$('#inviteUrl');if(!i)return;const done=()=>{b.textContent='已複製';setTimeout(()=>{lobbyDirty=true;NET.lobbyHtml='';},1500);};
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(i.value).then(done,()=>{i.select();});else i.select();return;}
+  if(act==='p2pretry'){const X=window.NOX_P2P;if(X)X.retry();lobbyDirty=true;return;}
+  if(act==='joincode'){const X=window.NOX_P2P,i=$('#roomCode');if(!X||!i)return;const v=i.value.trim();if(v.length<4){i.focus();return;}if(NET.role)leaveRoom();NET.autoJoin=true;X.join(v);lobbyDirty=true;return;}
   if(act==='solo'){if(isMP())leaveRoom();ensureAudio();initRun(charId);}
   else if(act==='host'){hostRoom();}
   else if(act==='join'){joinRoom(b.dataset.peer);}
