@@ -602,17 +602,21 @@ const CHARS=[
 const DIFFS=[
   {id:'easy',name:'初級',tag:'EASY',hp:1,dmg:1,spd:1,spawn:1,bsp:1,enrage:0.5,elites:{10:1,15:2,18:1},desc:'原本的難度，適合熟悉操作。'},
   {id:'hard',name:'進階',tag:'HARD',hp:1.45,dmg:1.3,spd:1.08,spawn:1.25,bsp:1.15,enrage:0.6,elites:{5:1,10:1,15:2,18:2},desc:'敵人血量 +45%、攻擊 +30%，更快更多。第 5 波就有菁英。'},
-  {id:'hell',name:'地獄',tag:'HELL',hp:2,dmg:1.6,spd:1.15,spawn:1.5,bsp:1.3,enrage:1,shots:3,elites:{5:1,8:1,10:2,13:1,15:2,18:3},desc:'血量 ×2、攻擊 +60%。機器人三連射，BOSS 一出場就暴怒。'},
+  {id:'hell',name:'地獄',tag:'HELL',hp:2,dmg:1.6,spd:1.15,spawn:1.5,bsp:1.3,growth:1.12,eco:1,price:1,enrage:1,shots:3,zone:0.12,elites:{6:1,9:1,11:2,13:1,15:2,18:3},desc:'血量 ×2、攻擊 +60%。機器人三連射，BOSS 一出場就暴怒。每波最後 5 秒安全區縮小。'},
   // growth: extra enemy HP per wave (compounding) so late waves keep up with a built-up player.
   // haz: seconds between liquidation zones that force you to move. eco/price slow down your power curve.
-  {id:'liq',name:'爆倉',tag:'LIQ',hp:2.6,dmg:2.2,spd:1.25,spawn:1.85,bsp:1.45,enrage:1,shots:3,growth:1.09,ramp:0.012,eco:0.85,price:1.15,regen:0.5,haz:5.5,hazPct:0.3,mini:[15],
-    elites:{4:1,7:1,10:2,12:1,15:3,18:3},desc:'血量 ×2.6、攻擊 ×2.2，之後每波再 +9%。地面會出現清算區，站著不動就會被炸。回血減半、商品更貴。'},
-  {id:'zero',name:'歸零',tag:'ZERO',hp:3.4,dmg:2.8,spd:1.32,spawn:2.2,bsp:1.6,enrage:1,shots:5,growth:1.13,ramp:0.02,eco:0.75,price:1.25,regen:0.3,haz:3.6,hazPct:0.4,mini:[10,15],
-    elites:{3:1,5:1,7:2,9:1,11:2,13:2,15:3,17:3,19:4},desc:'給高手的最終難度。血量 ×3.4、攻擊 ×2.8，每波再 +13%。清算區更密集，機器人五連發，第 10、15 波就有巨熊。'},
+  {id:'liq',name:'爆倉',tag:'LIQ',hp:2.6,dmg:2.2,spd:1.25,spawn:1.85,bsp:1.45,hazStart:6,rampW:14,enrage:1,shots:3,growth:1.1,ramp:0.012,eco:0.85,price:1.15,regen:0.5,haz:5.5,hazPct:0.3,zone:0.18,mini:[15],
+    elites:{6:1,8:1,10:2,12:1,15:3,18:3},desc:'血量 ×2.6、攻擊 ×2.2，第 7 波起每波再 +10%。地面會出現清算區，站著不動就會被炸。回血減半、商品更貴。'},
+  {id:'zero',name:'歸零',tag:'ZERO',hp:3.4,dmg:2.8,spd:1.32,spawn:2.2,bsp:1.6,hazStart:6,rampW:16,enrage:1,shots:4,growth:1.1,ramp:0.02,eco:0.75,price:1.25,regen:0.3,haz:3.6,hazPct:0.4,zone:0.25,mini:[15],
+    elites:{7:1,9:1,11:1,12:2,14:2,16:3,18:3,19:4},desc:'給高手的最終難度。血量 ×3.4、攻擊 ×2.8，第 7 波起每波再 +10%。清算區更密集，機器人五連發，第 15 波就有巨熊。'},
 ];
-const DX=k=>{const d=DIF(),def={growth:1,ramp:0,eco:1,price:1,regen:1,haz:0,hazPct:0,mini:[],shots:1};return d[k]!==undefined?d[k]:def[k];};
-const growthAt=w=>Math.pow(DX('growth'),Math.max(0,w-1));
-const enemyDmgMul=()=>(1+(wave-1)*0.12)*DIF().dmg*TEAM.dmg(TN_())*Math.sqrt(growthAt(wave));
+const DX=k=>{const d=DIF(),def={growth:1,ramp:0,eco:1,price:1,regen:1,haz:0,hazPct:0,hazStart:2,mini:[],shots:1,zone:0,rampW:12};return d[k]!==undefined?d[k]:def[k];};
+const growthAt=w=>Math.pow(DX('growth'),Math.max(0,w-6));
+// Hard tiers ease in: waves 1–6 use part of the tier's multiplier, full strength from wave 7.
+const rampK=()=>clamp((wave-1)/DX('rampW'),0,1);
+const DV=k=>1+(DIF()[k]-1)*rampK();
+const DR=k=>1+(DX(k)-1)*rampK(); // economy penalties ease in the same way
+const enemyDmgMul=()=>(1+(wave-1)*0.12)*DV('dmg')*TEAM.dmg(TN_())*growthAt(wave);
 let difId='easy';try{const d=localStorage.getItem('noxcat_dif');if(DIFFS.some(x=>x.id===d))difId=d;}catch(e){}
 const DIF=()=>DIFFS.find(d=>d.id===(NET.role==='client'?NET.dif:difId))||DIFFS[0];
 const DIFC={easy:'#b8f03c',hard:'#ffc94a',hell:'#ff4f6d',liq:'#ff5ad1',zero:'#a58cff'};
@@ -967,7 +971,7 @@ async function initNet(){
   room.onConnection(c=>{NET.conn=c;lobbyDirty=true;},()=>{});
   pushPresence(true);
 }
-const PKEYS=['app','nm','ts','H','ch','st','host','ep','seed','ph','dif','join','x','y','f','hp','mh','dd','wp','fx','rdy','w','d','t','E','B','D','T','bh','bm'];
+const PKEYS=['app','nm','ts','H','Z','ch','st','host','ep','seed','ph','dif','join','x','y','f','hp','mh','dd','wp','fx','rdy','w','d','t','E','B','D','T','bh','bm'];
 function hostPhase(){if(state==='play'||state==='dying'||state==='paused')return 'play';if(state==='between')return 'shop';if(state==='over')return NET.win?'win':'over';return 'lobby';}
 function encWp(){return P.weapons.map(w=>WT.indexOf(w.type)+''+w.tier).join('');}
 function encDmg(){const out=[];const now=tAll;for(const [id,v] of NET.cum){if(EM.has(id))NET.cumSeen.set(id,now);if(now-(NET.cumSeen.get(id)||now)>2.5){NET.cum.delete(id);NET.cumSeen.delete(id);continue;}out.push(id.toString(36)+':'+Math.round(v).toString(36));}return out.join(',');}
@@ -977,7 +981,7 @@ function encSnap(o){
   let D='';n=0;for(let i=drops.length-1;i>=0&&n<50;i--,n++){const d=drops[i];D+=b36(d.id,3)+b36(d.x/2,2)+b36(d.y/2,2)+d.k+b36(d.v,2);}
   let H='';n=0;for(const h of hazards){if(n++>=16)break;H+=b36(h.id,2)+b36(h.x/2,2)+b36(h.y/2,2)+b36(Math.max(0,Math.round(h.t*10)),1)+b36(h.r/4,1);}
   let Tl='';n=0;for(const t of teles){if(n++>=30)break;Tl+=b36(t.x/2,2)+b36(t.y/2,2)+(t.big?'b':'s');}
-  Object.assign(o,{E,B,D,H,T:Tl,t:wave===20?-1:Math.max(0,Math.round(waveT*10)),bh:bossAlive&&!bossAlive.dead?Math.ceil(bossAlive.hp):0,bm:bossAlive?Math.ceil(bossAlive.max):0});
+  Object.assign(o,{E,B,D,H,Z:zone?b36(zone.x/2,2)+b36(zone.y/2,2):'',T:Tl,t:wave===20?-1:Math.max(0,Math.round(waveT*10)),bh:bossAlive&&!bossAlive.dead?Math.ceil(bossAlive.hp):0,bm:bossAlive?Math.ceil(bossAlive.max):0});
   let len=JSON.stringify(o).length;
   while(len>3900&&o.D.length){o.D=o.D.slice(0,-10);len-=10;}
   while(len>3900&&o.B.length){o.B=o.B.slice(0,-7);len-=7;}
@@ -989,7 +993,7 @@ function myPresence(){
   if(NET.role==='client'){o.join=NET.hostPeer;o.ep=NET.ep;}
   if(isMP()&&inRun()){Object.assign(o,{ts:Math.round(performance.now()),x:Math.round(P.x),y:Math.round(P.y),f:P.face,hp:Math.ceil(Math.max(0,P.hp)),mh:maxHp(),dd:P.dead?1:0,wp:encWp(),fx:NET.fxRing.slice(),rdy:NET.ready?wave:0,w:wave});
     if(isClient())o.d=encDmg();}
-  if(NET.role==='host'){if(state==='play'||state==='dying'||state==='paused')encSnap(o);else Object.assign(o,{E:'',B:'',D:'',H:'',T:'',t:0,bh:0,bm:0});}
+  if(NET.role==='host'){if(state==='play'||state==='dying'||state==='paused')encSnap(o);else Object.assign(o,{E:'',B:'',D:'',H:'',Z:'',T:'',t:0,bh:0,bm:0});}
   const patch={};for(const k of PKEYS)patch[k]=o[k]===undefined?null:o[k];return patch;
 }
 function pushPresence(force){if(!NET.room)return;const now=performance.now();if(!force&&now-NET.pushT<(inRun()&&isMP()?50:1000))return;NET.pushT=now;NET.room.presence(myPresence()).catch(()=>{});}
@@ -1073,6 +1077,7 @@ function clientApplySnap(pr){
   const D=String(pr.D||'');const ds=[];
   for(let i=0;i+10<=D.length;i+=10){ds.push({id:p36(D,i,3),x:p36(D,i+3,2)*2,y:p36(D,i+5,2)*2,k:D[i+7],v:p36(D,i+8,2)});}
   drops=ds;
+  {const Zs=String(pr.Z||'');if(Zs.length>=4){if(!zone)zoneWarn();zone={x:p36(Zs,0,2)*2,y:p36(Zs,2,2)*2};}else zone=null;}
   {const Hs=String(pr.H||''),seenH=new Set();for(let i=0;i+8<=Hs.length;i+=8){const id=p36(Hs,i,2);seenH.add(id);let h=HZ.get(id);
     if(!h){h={id,x:p36(Hs,i+2,2)*2,y:p36(Hs,i+4,2)*2,t:p36(Hs,i+6,1)/10,r:p36(Hs,i+7,1)*4,max:1.7};HZ.set(id,h);hazards.push(h);}}
    for(const [id,h] of HZ)if(!seenH.has(id)&&h.done)HZ.delete(id);}
@@ -1261,7 +1266,15 @@ function showOnly(id){for(const o of['#title','#lvl','#shop','#pause','#over','#
 function setHud(on){$('#hud').hidden=!on;$('#hotbar').hidden=!on;$('#ultBtn').hidden=!on;}
 function initRun(cid,seed){charId=cid;P=newP(cid);const ch=CHARS.find(c=>c.id===cid);addBonus(ch.fx);P.weapons.push(newWeapon(ch.weapon,0));shopOffers=[];NET.win=false;runAch=[];runSeed=seed!=null?seed:randi(1,2e9);genMap(runSeed,0);trk('start',cid);startWave(1);useBank();}
 let hazards=[],hazT=0,nextHaz=1;const HZ=new Map();
-function resetWave(){hazards=[];HZ.clear();hazT=2.5;enemies=[];EM.clear();shots=[];ebul=[];NET.bullets.clear();drops=[];picks.clear();teles=[];fx=[];nums=[];bossAlive=null;NET.bh=0;NET.bm=0;}
+let zone=null,zoneAcc=0;const ZONE_T=5,ZONE_R0=560;const zR1=()=>wave<6?240:wave<12?190:150;
+const zoneR=()=>zone?zR1()+(ZONE_R0-zR1())*clamp(waveT/ZONE_T,0,1):0;
+function zoneStart(){const al=allPlayers();if(!al.length)return;let cx=0,cy=0;for(const p of al){cx+=p.x;cy+=p.y;}cx/=al.length;cy/=al.length;
+  for(let k=0;k<30;k++){const a=rand(0,TAU),d=rand(40,150),x=clamp(cx+Math.cos(a)*d,180,W_W-180),y=clamp(cy+Math.sin(a)*d,180,W_H-180);if(floorOK(x,y,40)){cx=x;cy=y;break;}}
+  zone={x:cx,y:cy};zoneWarn();}
+function zoneWarn(){banner('安全區縮小中！待在圈內','#ff8aa0');sfx('zap');}
+function zoneTick(dt){if(!zone||P.dead||state!=='play')return;const d=Math.hypot(P.x-zone.x,P.y-zone.y);
+  if(d>zoneR()){zoneAcc+=maxHp()*DX('zone')*dt;if(zoneAcc>=1){const k=Math.floor(zoneAcc);zoneAcc-=k;P.hp-=k;P.hitWave=true;num(P.x,P.y-46,'-'+k,'#ff8aa0',false);if(P.hp<=0){P.hp=0;die();}}}}
+function resetWave(){zone=null;zoneAcc=0;hazards=[];HZ.clear();hazT=2.5;enemies=[];EM.clear();shots=[];ebul=[];NET.bullets.clear();drops=[];picks.clear();teles=[];fx=[];nums=[];bossAlive=null;NET.bh=0;NET.bm=0;}
 function startWave(n){
   wave=n;state='play';lvlPicked=[];waveLen=Math.min(60,20+n*2);waveT=n===20?Infinity:waveLen;spawnT=0.6;winT=0;resetWave();trapT=rand(9,15);
   {const bi=biomeOf(n),chg=bi!==curBiome;if(chg)genMap(runSeed+bi*1013,bi);if(chg||n===1)zoneShow(bi);}
@@ -1282,7 +1295,7 @@ function endWave(){
   state='between';const cleanWave=!P.hitWave&&!P.dead;let v=0;for(const p of picks.values())if(!p.got&&p.k==='p')v+=p.v;
   if(isClient()){for(const d of drops)if(!picks.has(d.id)&&d.k==='p')v+=d.v;}
   picks.clear();
-  const h=Math.max(0,Math.round(stat('harvest')));const vv=Math.round(v*TEAM.eco(TN_())*DX('eco'));lastHarvest={drops:vv,harvest:h};P.paws+=vv+h;addXp(vv/1.5+h,true);trk('paws',vv);trk('wave',wave,cleanWave);
+  const h=Math.max(0,Math.round(stat('harvest')));const vv=Math.round(v*TEAM.eco(TN_())*DR('eco'));lastHarvest={drops:vv,harvest:h};P.paws+=vv+h;addXp(vv/1.5+h,true);trk('paws',vv);trk('wave',wave,cleanWave);
   P.dead=false;setHud(false);$('#banner').hidden=true;$('#spect').hidden=true;
   if(P.pending>0)showLevelUp();else openShop();
   pushPresence(true);
@@ -1305,14 +1318,14 @@ function pickType(){const pool=[['phish',10]];if(wave>=3)pool.push(['bot',2+wave
 const TEAM={hp:n=>1+0.8*(n-1),boss:n=>1+1.0*(n-1),dmg:n=>1+0.15*(n-1),spawn:n=>1+0.3*(n-1),group:n=>Math.round((n-1)*1.2),elites:n=>Math.floor(n/2),eco:n=>1/(1+0.45*(n-1))};
 const TN_=()=>Math.max(1,NET.nPlayers|0);
 function teamNote(n){if(n<2)return '';return `${n} 人組隊：敵人血量 ×${TEAM.hp(n).toFixed(2).replace(/0$/,'')}、BOSS 血量 ×${TEAM.boss(n)}、攻擊 +${Math.round((TEAM.dmg(n)-1)*100)}%、數量約 +${Math.round((TEAM.spawn(n)*(1+TEAM.group(n)/3)-1)*100)}%，每人拿到的爪幣和經驗 ×${TEAM.eco(n).toFixed(2)}。`;}
-function addPaws(v){const x=v*TEAM.eco(TN_())*DX('eco')+(P.pawFrac||0),k=Math.floor(x);P.pawFrac=x-k;P.paws+=k;return k;}
-function makeFoe(type,x,y){const D=DIF(),d=FOES[type],hpMul=(1+(wave-1)*0.32+Math.max(0,wave-10)*0.15)*(type==='bear'?TEAM.boss(TN_())*(wave<20?0.45:1):TEAM.hp(TN_()))*D.hp*growthAt(wave),hp=d.hp*hpMul;
-  const e={id:nextId,type,x,y,r:d.r,hp,max:hp,spd:d.spd*(1+Math.min(0.3,(wave-1)*0.015))*D.spd*(1+DX('ramp')*(wave-1)),dmg:Math.round(d.dmg*enemyDmgMul()),ai:d.ai,t:rand(0,9),flash:0,kx:0,ky:0,mode:'walk',mt:0,cd:rand(1,2.2),dx:0,dy:0,enraged:type==='bear'&&D.enrage>=1,hx:0,hy:0,hitT:0,shieldHp:0,shiny:false};
+function addPaws(v){const x=v*TEAM.eco(TN_())*DR('eco')+(P.pawFrac||0),k=Math.floor(x);P.pawFrac=x-k;P.paws+=k;return k;}
+function makeFoe(type,x,y){const D=DIF(),d=FOES[type],hpMul=(1+(wave-1)*0.32+Math.max(0,wave-10)*0.15)*(type==='bear'?TEAM.boss(TN_())*(wave<20?0.45:1):TEAM.hp(TN_()))*DV('hp')*growthAt(wave),hp=d.hp*hpMul;
+  const e={id:nextId,type,x,y,r:d.r,hp,max:hp,spd:d.spd*(1+Math.min(0.3,(wave-1)*0.015))*DV('spd')*(1+DX('ramp')*(wave-1)),dmg:Math.round(d.dmg*enemyDmgMul()),ai:d.ai,t:rand(0,9),flash:0,kx:0,ky:0,mode:'walk',mt:0,cd:rand(1,2.2),dx:0,dy:0,enraged:type==='bear'&&D.enrage>=1,hx:0,hy:0,hitT:0,shieldHp:0,shiny:false};
   if(type!=='bear'&&type!=='leek'&&Math.random()<1/140){e.shiny=true;e.hp*=1.6;e.max=e.hp;}
   if(e.enraged)setTimeout(()=>banner('熊市巨熊暴怒登場！','#ff8aa0'),0);
   nextId=(nextId+1)%46656||1;EM.set(e.id,e);return e;}
 function spawnTick(dt){
-  spawnT-=dt;if(spawnT>0)return;let iv=Math.max(0.3,1.2-wave*0.045)*rand(0.8,1.2)/DIF().spawn/TEAM.spawn(TN_());if(wave===20)iv*=1.8;spawnT=iv;
+  spawnT-=dt;if(spawnT>0)return;let iv=Math.max(0.3,1.2-wave*0.045)*rand(0.8,1.2)/DV('spawn')/TEAM.spawn(TN_());if(wave===20)iv*=1.8;spawnT=iv;
   const cap=isMP()?120:150;if(enemies.length+teles.length>=cap)return;
   const g=1+Math.floor(wave/3)+(Math.random()<0.35?1:0)+TEAM.group(TN_()),p=spawnPoint();
   for(let i=0;i<g;i++){let x=p.x+rand(-45,45),y=p.y+rand(-45,45);if(!floorOK(x,y,16)){x=p.x;y=p.y;}teles.push({x,y,t:0.9,type:pickType()});}
@@ -1494,7 +1507,7 @@ function dealDamage(e,base,kx,ky,kb){
   if(e.dead||e.ghost)return;let d=base*(1+stat('dmg')/100);const crit=Math.random()*100<stat('crit');if(crit)d*=2;if(e.frozenT>0||e.frozen)d*=1.3;d=Math.max(1,Math.round(d));charge(crit?0.7:0.4);
   num(e.x,e.y-e.r-6,d,crit?'#ffd23f':'#f5c542',crit);sfx(crit?'crit':'hit');
   hitBurst(e.x-kx*e.r*0.6,e.y-ky*e.r*0.6,kx,ky,FOES[e.type].col,crit);
-  if(Math.random()*100<stat('lifesteal'))heal(1);
+  if(Math.random()*100<stat('lifesteal')&&tAll-(P.lsT||0)>0.25){P.lsT=tAll;heal(1);}
   e.hitT=0.08;e.hx=kx;e.hy=ky;e.flash=0.09;
   if(isClient()){NET.cum.set(e.id,(NET.cum.get(e.id)||0)+d);NET.cumSeen.set(e.id,tAll);e.recent.push({t:tAll,d});
     const pend=e.recent.reduce((s,r)=>s+(tAll-r.t<0.45?r.d:0),0);if(!e.shielded&&e.hp-pend<=0){e.ghost=true;e.ghostT=tAll;P.kills++;trk('kill',e.type,e.shiny);killFx(e);}return;}
@@ -1512,7 +1525,7 @@ function hazBoom(h){
   fx.push({k:'flash',x:h.x,y:h.y,r:h.r*0.9,life:0.1,max:0.1,col:'rgba(255,90,120,.75)'});fx.push({k:'ring',x:h.x,y:h.y,r:h.r,life:0.3,max:0.3,col:'#ff4f6d'});
   for(let i=0;i<12;i++){const a=rand(0,TAU),sp=rand(80,260);fx.push({k:'p',x:h.x+Math.cos(a)*h.r*0.4,y:h.y+Math.sin(a)*h.r*0.4,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:0.35,max:0.35,col:pick(['#ff4f6d','#ffd166','#ffffff']),s:Math.random()<0.4?2:1});}
   if(Math.hypot(P.x-h.x,P.y-h.y)<h.r+20)shake=Math.max(shake,0.25);
-  if(!P.dead&&state==='play'&&Math.hypot(P.x-h.x,P.y-h.y)<h.r+10){const was=P.inv;P.inv=0;hurt(Math.ceil(maxHp()*DX('hazPct')));if(P.inv<=0)P.inv=was;}
+  if(!P.dead&&state==='play'&&Math.hypot(P.x-h.x,P.y-h.y)<h.r+10){const was=P.inv;P.inv=0;hurt(Math.ceil(maxHp()*DX('hazPct')*(0.5+0.5*rampK())));if(P.inv<=0)P.inv=was;}
   sfx('boom');
 }
 function tickHazards(dt){for(const h of hazards){h.t-=dt;if(h.t<=0&&!h.done){h.done=true;hazBoom(h);}}hazards=hazards.filter(h=>!h.done);}
@@ -1612,7 +1625,7 @@ function update(dt){
     const ml=Math.hypot(mx,my);if(ml>1){mx/=ml;my/=ml;}
     const sp=230*Math.max(0.4,1+stat('speed')/100);P.x+=mx*sp*dt;P.y+=my*sp*dt;collide(P,14);charge(Math.min(1,ml)*sp*dt*0.011);
     P.moving=ml>0.1;if(mx<-0.1)P.face=-1;else if(mx>0.1)P.face=1;
-    const rg=stat('regen')*DX('regen');if(rg>0){P.regenAcc+=rg*0.12*dt;while(P.regenAcc>=1){P.regenAcc-=1;heal(1);}}
+    const rg=stat('regen')*DX('regen');if(rg>0){P.regenAcc+=rg*0.12/(1+rg/40)*dt;while(P.regenAcc>=1){P.regenAcc-=1;heal(1);}}
   }
   P.inv=Math.max(0,P.inv-dt);shake=Math.max(0,shake-dt);
   if(isClient())clientSim(dt);else if(hostSim(dt)===false)return;
@@ -1675,8 +1688,10 @@ function explode(x,y,aoe,loud){
 }
 function hostSim(dt){
   tickHazards(dt);
+  if(DX('zone')>0&&wave<20&&!zone&&waveT<=ZONE_T&&waveT>0)zoneStart();
+  zoneTick(dt);
   if(winT<=0){if(wave<20){waveT-=dt;if(waveT<=0){endWave();return false;}}spawnTick(dt);
-    if(DX('haz')>0&&wave>=2){hazT-=dt;if(hazT<=0){hazT=DX('haz')*rand(0.7,1.3);const tg=allPlayers();const k=1+Math.floor(wave/7);
+    if(DX('haz')>0&&wave>=DX('hazStart')){hazT-=dt;if(hazT<=0){hazT=DX('haz')*rand(0.7,1.3);const tg=allPlayers();const k=1+Math.floor(wave/7);
       for(let i=0;i<k&&tg.length;i++){const pl=pick(tg),a=rand(0,TAU),dd=i===0?rand(0,40):rand(60,220),x=clamp(pl.x+Math.cos(a)*dd,40,W_W-40),y=clamp(pl.y+Math.sin(a)*dd,40,W_H-40);
         hazards.push({id:nextHaz,x,y,r:rand(66,96),t:1.7,max:1.7});nextHaz=(nextHaz+1)%1296||1;}}}
     trapT-=dt;if(trapT<=0){trapT=rand(16,26);const q=spawnPoint(160);addDrop(q.x,q.y,pick(['b','c','m']),1);}}
@@ -1693,8 +1708,8 @@ function hostSim(dt){
       if(e.ai==='chase'){vx=nx*e.spd;vy=ny*e.spd;}
       else if(e.ai==='shooter'){
         if(d>300){vx=nx*e.spd;vy=ny*e.spd;}else if(d<200){vx=-nx*e.spd*0.7;vy=-ny*e.spd*0.7;}else{vx=-ny*e.spd*0.4;vy=nx*e.spd*0.4;}
-        e.cd-=dt;if(e.cd<=0&&d<540){e.cd=rand(2,2.7);const D=DIF(),k=DX('shots'),ba=Math.atan2(ny,nx);
-          for(let q=0;q<k;q++){const aa=ba+(q-(k-1)/2)*0.22;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(aa)*220*D.bsp,vy:Math.sin(aa)*220*D.bsp,r:8,dmg:Math.round(e.dmg*1.4),life:3.5});nextBul=(nextBul+1)%1296;}}
+        e.cd-=dt;if(e.cd<=0&&d<540){e.cd=rand(2,2.7);const D=DIF(),k=1+Math.round((DX('shots')-1)*rampK()),ba=Math.atan2(ny,nx);
+          for(let q=0;q<k;q++){const aa=ba+(q-(k-1)/2)*0.22;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(aa)*220*DV('bsp'),vy:Math.sin(aa)*220*DV('bsp'),r:8,dmg:Math.round(e.dmg*1.4),life:3.5});nextBul=(nextBul+1)%1296;}}
       }else if(e.ai==='healer'||e.ai==='shielder'){
         if(d>280){vx=nx*e.spd;vy=ny*e.spd;}else if(d<190){vx=-nx*e.spd*0.8;vy=-ny*e.spd*0.8;}else{vx=-ny*e.spd*0.35;vy=nx*e.spd*0.35;}
         e.cd-=dt;if(e.mode==='wind'){e.mt-=dt;if(e.mt<=0){e.mode='walk';supportPulse(e);}}
@@ -1709,11 +1724,11 @@ function hostSim(dt){
       }else{
         const big=e.ai!=='dasher',DS=e.ai==='dasher'?560:e.ai==='whale'?470:520*rage,WIND=e.ai==='dasher'?0.6:0.85/rage,REST=e.ai==='dasher'?1.3:2.6/rage,TRIG=e.ai==='dasher'?320:e.ai==='whale'?420:480;
         if(e.mode==='dash'){vx=e.dx*DS;vy=e.dy*DS;e.mt-=dt;if(e.mt<=0){e.mode='rest';e.mt=REST;
-            if(e.ai==='whale'){for(let i=0;i<8;i++){const a=i/8*TAU;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(a)*170*DIF().bsp,vy:Math.sin(a)*170*DIF().bsp,r:8,dmg:Math.round(e.dmg*0.7),life:3,wh:true});nextBul=(nextBul+1)%1296;}}
+            if(e.ai==='whale'){for(let i=0;i<8;i++){const a=i/8*TAU;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(a)*170*DV('bsp'),vy:Math.sin(a)*170*DV('bsp'),r:8,dmg:Math.round(e.dmg*0.7),life:3,wh:true});nextBul=(nextBul+1)%1296;}}
             puff(e.x,e.y+e.r*0.6,big?6:2,big?9:5,'#c9ccd4');}}
         else if(e.mode==='wind'){e.mt-=dt;if(e.mt<=0){e.mode='dash';e.mt=big?0.6:0.42;e.dx=nx;e.dy=ny;}}
         else{vx=nx*e.spd*rage;vy=ny*e.spd*rage;if(e.mode==='rest'){e.mt-=dt;if(e.mt<=0)e.mode='walk';}else if(d<TRIG){e.mode='wind';e.mt=WIND;}}
-        if(e.ai==='boss'){e.cd-=dt;if(e.cd<=0){e.cd=e.enraged?1.7:2.6;const k=e.enraged?22:16,off=rand(0,TAU),bs=(e.enraged?220:180)*DIF().bsp;for(let i=0;i<k;i++){const a=off+i/k*TAU;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(a)*bs,vy:Math.sin(a)*bs,r:10,dmg:Math.round(e.dmg*0.8),life:5,big:true});nextBul=(nextBul+1)%1296;}}}
+        if(e.ai==='boss'){e.cd-=dt;if(e.cd<=0){e.cd=e.enraged?1.7:2.6;const k=e.enraged?22:16,off=rand(0,TAU),bs=(e.enraged?220:180)*DV('bsp');for(let i=0;i<k;i++){const a=off+i/k*TAU;ebul.push({id:nextBul,x:e.x,y:e.y,vx:Math.cos(a)*bs,vy:Math.sin(a)*bs,r:10,dmg:Math.round(e.dmg*0.8),life:5,big:true});nextBul=(nextBul+1)%1296;}}}
       }
     }
     e.kx*=Math.pow(0.0008,dt);e.ky*=Math.pow(0.0008,dt);
@@ -1727,6 +1742,7 @@ function hostSim(dt){
   drops=drops.filter(d=>d.k==='x'||tAll-d.born<(d.k==='p'?25:20));
 }
 function clientSim(dt){
+  zoneTick(dt);
   for(const h of hazards){h.t-=dt;if(h.t<=0&&!h.done){h.done=true;hazBoom(h);}}hazards=hazards.filter(h=>!h.done);
   if(isFinite(waveT))waveT=Math.max(0,waveT-dt);
   const nowMs=performance.now();
@@ -1765,6 +1781,8 @@ function render(){
   g.drawImage(mapC,0,0);
   for(const s of sparkles){const a=Math.sin(tAll*3+s.p);if(a>0.2){g.fillStyle=s.c;g.fillRect(B(s.x),B(s.y),1,1);if(a>0.85){g.fillRect(B(s.x)-1,B(s.y),3,1);g.fillRect(B(s.x),B(s.y)-1,1,3);}}}
   for(const k of crystals){if(k.t==='crystal')shadow(k.x,k.y+2,22,7,'rgba(184,240,60,.12)');else if(k.t==='rack')shadow(k.x,k.y+2,18,6,'rgba(87,227,255,.14)');shadow(k.x,k.y,k.r*0.9,k.r*0.28);}
+  if(zone){const R=Math.round(zoneR()/2),cx=B(zone.x),cy=B(zone.y);g.save();g.beginPath();g.rect(-ox-4,-oy-4,BW+8,BH+8);g.arc(cx,cy,R,0,TAU,true);g.fillStyle='rgba(255,40,80,.22)';g.fill('evenodd');g.restore();
+    g.fillStyle=Math.floor(tAll*8)%2?'#ffffff':'#ff4f6d';pring(cx,cy,R,2);}
   for(const h of hazards){const k=1-Math.max(0,h.t)/h.max,cx=B(h.x),cy=B(h.y),R=Math.round(h.r/2),blink=h.t<0.5&&Math.floor(tAll*20)%2;
     g.fillStyle='rgba(255,40,80,'+(0.10+0.22*k).toFixed(3)+')';pdisc(cx,cy,R);
     g.fillStyle=blink?'#ffffff':'rgba(255,79,109,.95)';pring(cx,cy,R,1);
@@ -1995,7 +2013,7 @@ $('#lvl').addEventListener('click',e=>{const b=e.target.closest('.lvcard');if(!b
   addBonus({[o.s]:o.v});lvlPicked.push(`${STAT[o.s][0]} +${o.v}${STAT[o.s][1]}`);P.pending--;sfx('buy');
   b.classList.add('chosen');setTimeout(()=>{if(P.pending>0)showLevelUp();else openShop();},260);});
 
-const priceAdj=p=>Math.max(1,Math.round(p*(1+0.08*(wave-1))*DX('price')*(1-Math.min(60,stat('discount'))/100)));
+const priceAdj=p=>Math.max(1,Math.round(p*(1+0.08*(wave-1))*DR('price')*(1-Math.min(60,stat('discount'))/100)));
 const offerPrice=o=>o.kind==='w'?priceAdj(WPRICE[o.tier]):priceAdj(ITEMS.find(i=>i.id===o.id).price);
 function rollTier(){const w=wave,r=Math.random(),p4=w>=12?Math.min(0.12,(w-11)*0.02):0,p3=w>=7?Math.min(0.3,(w-6)*0.04):0,p2=w>=3?Math.min(0.45,(w-2)*0.06):0;if(r<p4)return 3;if(r<p4+p3)return 2;if(r<p4+p3+p2)return 1;return 0;}
 function genOffer(){if(Math.random()<0.42)return {kind:'w',type:pick(WT),tier:rollTier()};return {kind:'i',id:pick(ITEMS).id};}
