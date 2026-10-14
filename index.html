@@ -662,26 +662,26 @@ const CHARS=[
   // fur (B/D/N), vest (v/Z), sleeves (A), pants (J) and lens (L/l) differ per cat so each reads at a glance
   {id:'nox',name:'俠貓 NOX',tag:'BAL',col:'#b8f03c',weapon:'claw',fx:{},desc:'起始武器：貓爪。各項能力平均，第一次玩選牠。',
     pal:{B:'#1c1d21',D:'#2e3036',N:'#4c4d56',v:'#131418',Z:'#6d727a',A:'#f1f3ee',J:'#28385a',L:'#b8f03c',l:'#6e9a1c'}},
-  {id:'miner',name:'礦工貓',tag:'ECO',col:'#ff9a3c',weapon:'hairball',fx:{harvest:6,discount:6,dmg:-12},desc:'橘貓。起始武器：毛球彈。每波收成 +6、商店折扣 6%，但傷害 −12%。',
+  {id:'miner',name:'礦工貓',tag:'ECO',col:'#ff9a3c',weapon:'hairball',fx:{harvest:6,discount:6,dmg:-6},desc:'橘貓。起始武器：毛球彈。每波收成 +6、商店折扣 6%，但傷害 −6%。',
     pal:{B:'#e07a2a',D:'#f6a55a',N:'#9c4818',v:'#5a3a1e',Z:'#e3b04a',A:'#f1f3ee',J:'#3b4a6b',L:'#ffd34a',l:'#b07a12'}},
   {id:'hacker',name:'駭客貓',tag:'CRIT',col:'#57e3ff',weapon:'laser',fx:{crit:10,range:10,maxHp:-6},desc:'白貓。起始武器：護目鏡雷射。暴擊率 +10%、射程 +10%，最大生命 −6。',
     pal:{B:'#e9ecf1',D:'#ffffff',N:'#e09aac',v:'#17607a',Z:'#57e3ff',A:'#2a9cc0',J:'#262b36',L:'#57e3ff',l:'#1d8aa6'}},
-  {id:'guard',name:'守護貓',tag:'TANK',col:'#8fb4ff',weapon:'wallet',fx:{armor:3,maxHp:6,speed:-12,as:-10},desc:'藍灰貓。起始武器：冷錢包。護甲 +3、最大生命 +6，但移動 −12%、攻速 −10%。',
+  {id:'guard',name:'守護貓',tag:'TANK',col:'#8fb4ff',weapon:'wallet',fx:{armor:2,maxHp:6,speed:-12,as:-10},desc:'藍灰貓。起始武器：冷錢包。護甲 +2、最大生命 +6，但移動 −12%、攻速 −10%。',
     pal:{B:'#6f85a3',D:'#93a8c6',N:'#465a77',v:'#1f2f52',Z:'#c9d6e8',A:'#a7b9d1',J:'#18233a',L:'#a8d8ff',l:'#4f7fb0'}},
   {id:'flash',name:'閃電貓',tag:'SPD',col:'#d58cff',weapon:'chain',fx:{speed:12,dodge:6,maxHp:-6},desc:'紫貓。起始武器：鏈結閃電。移動 +12%、閃避 +6%，最大生命 −6。',
     pal:{B:'#9b6bd6',D:'#bb92f2',N:'#62379c',v:'#d63c8f',Z:'#ffd1ec',A:'#f1f3ee',J:'#3a2257',L:'#ff7ab0',l:'#b0306c'}},
-  {id:'fomo',name:'赤焰貓',tag:'DMG',col:'#ff5a4a',weapon:'key',fx:{dmg:12,crit:3,armor:-3},desc:'紅貓。起始武器：私鑰飛刃。傷害 +12%、暴擊 +3%，但護甲 −3。',
+  {id:'fomo',name:'赤焰貓',tag:'DMG',col:'#ff5a4a',weapon:'key',fx:{dmg:15,crit:3,armor:-1},desc:'紅貓。起始武器：私鑰飛刃。傷害 +15%、暴擊 +3%，但護甲 −1。',
     pal:{B:'#c8373a',D:'#ec6355',N:'#7a1a20',v:'#262626',Z:'#f5c542',A:'#2f2f2f',J:'#4a1c1f',L:'#f5c542',l:'#a8771a'}},
 ];
 const DIFFS=[
   {id:'easy',name:'初級',tag:'EASY',hp:1,dmg:1,spd:1,spawn:1,bsp:1,enrage:0.5,elites:{10:1,15:2,18:1},desc:'原本的難度，適合熟悉操作。'},
   {id:'hard',name:'進階',tag:'HARD',hp:1.45,dmg:1.3,spd:1.08,spawn:1.25,bsp:1.15,enrage:0.6,elites:{5:1,10:1,15:2,18:2},desc:'敵人血量 +45%、攻擊 +30%，更快更多。第 5 波就有菁英。'},
-  {id:'hell',name:'地獄',tag:'HELL',hp:2,dmg:1.6,spd:1.15,spawn:1.5,bsp:1.3,growth:1.12,eco:1,price:1,enrage:1,shots:3,zone:0.12,elites:{6:1,9:1,11:2,13:1,15:2,18:3},desc:'血量 ×2、攻擊 +60%。機器人三連射，BOSS 一出場就暴怒。每波最後 5 秒安全區縮小。'},
+  {id:'hell',name:'地獄',tag:'HELL',hp:2,dmg:1.6,spd:1.15,spawn:1.5,bsp:1.3,growth:1.127,eco:1,price:1,enrage:1,shots:3,zone:0.12,elites:{6:1,9:1,11:2,13:1,15:2,18:3},desc:'血量 ×2、攻擊 +60%。機器人三連射，BOSS 一出場就暴怒。每波最後 5 秒安全區縮小。'},
   // growth: extra enemy HP per wave (compounding) so late waves keep up with a built-up player.
   // haz: seconds between liquidation zones that force you to move. eco/price slow down your power curve.
   {id:'liq',name:'爆倉',tag:'LIQ',hp:2.6,dmg:2.2,spd:1.25,spawn:1.85,bsp:1.45,hazStart:6,rampW:14,enrage:1,shots:3,growth:1.1,ramp:0.012,eco:0.85,price:1.15,regen:0.5,haz:5.5,hazPct:0.3,zone:0.18,mini:[15],
     elites:{6:1,8:1,10:2,12:1,15:3,18:3},desc:'血量 ×2.6、攻擊 ×2.2，第 7 波起每波再 +10%。地面會出現清算區，站著不動就會被炸。回血減半、商品更貴。'},
-  {id:'zero',name:'歸零',tag:'ZERO',hp:3.4,dmg:2.8,spd:1.32,spawn:2.2,bsp:1.6,hazStart:6,rampW:16,enrage:1,shots:4,growth:1.1,ramp:0.02,eco:0.75,price:1.25,regen:0.3,haz:3.6,hazPct:0.4,zone:0.25,mini:[15],
+  {id:'zero',name:'歸零',tag:'ZERO',hp:3.4,dmg:2.8,spd:1.32,spawn:2.2,bsp:1.6,hazStart:6,rampW:16,enrage:1,shots:4,growth:1.075,ramp:0.02,eco:0.75,price:1.25,regen:0.3,haz:3.6,hazPct:0.4,zone:0.25,mini:[15],
     elites:{7:1,9:1,11:1,12:2,14:2,16:3,18:3,19:4},desc:'給高手的最終難度。血量 ×3.4、攻擊 ×2.8，第 7 波起每波再 +10%。清算區更密集，機器人五連發，第 15 波就有巨熊。'},
 ];
 const DX=k=>{const d=DIF(),def={growth:1,ramp:0,eco:1,price:1,regen:1,haz:0,hazPct:0,hazStart:2,mini:[],shots:1,zone:0,rampW:12};return d[k]!==undefined?d[k]:def[k];};
@@ -1472,7 +1472,7 @@ const ULTS={
   nox:{name:'暗夜爪擊',desc:'360° 爪擊風暴，重創周圍敵人並無敵 0.8 秒。'},
   miner:{name:'空投雨',desc:'8 顆冷錢包從天而降轟炸敵人，並吸走全場爪幣。'},
   hacker:{name:'全網駭入',desc:'凍結附近敵人 2 秒、清除附近敵方子彈，凍結中的敵人受傷 +30%。'},
-  guard:{name:'冷錢包護盾',desc:'3.5 秒無敵護盾，撞到的敵人被彈開受傷，並回復 15% 生命。'},
+  guard:{name:'冷錢包護盾',desc:'1.5 秒無敵護盾，撞到的敵人被彈開受傷，並回復 4% 生命。'},
   flash:{name:'雷霆萬鈞',desc:'1.8 秒內落雷 12 次，移動速度 +30%。'},
   fomo:{name:'FOMO 狂暴',desc:'4.5 秒內攻速 +45%、傷害 +25%，身邊火焰灼燒敵人。'},
 };
@@ -1498,7 +1498,7 @@ function castUlt(){
   if(ch.id==='nox'){for(const e of enemies){if(e.dead||e.ghost)continue;const d=Math.hypot(e.x-P.x,e.y-P.y);if(d<150+e.r){const l=d||1;dealDamage(e,base*1.8,(e.x-P.x)/l,(e.y-P.y)/l,260);}}P.shieldT=0.8;P.ult={kind:'nox',t:0.4,tick:0};}
   else if(ch.id==='miner'){P.ult={kind:'miner',t:1.8,tick:0,n:8};P.magT=2;}
   else if(ch.id==='hacker'){if(!isClient())freezeAround(P.x,P.y,320,2);P.ult={kind:'hacker',t:2,tick:0};}
-  else if(ch.id==='guard'){P.shieldT=3.5;heal(Math.round(maxHp()*0.15));P.ult={kind:'guard',t:3.5,tick:0};}
+  else if(ch.id==='guard'){P.shieldT=1.5;heal(Math.round(maxHp()*0.04));P.ult={kind:'guard',t:1.5,tick:0};}
   else if(ch.id==='flash'){P.ult={kind:'flash',t:1.8,tick:0};P.tmp={speed:30};P.tmpT=3;}
   else if(ch.id==='fomo'){P.ult={kind:'fomo',t:4.5,tick:0};P.tmp={as:45,dmg:25};P.tmpT=4.5;}
   noCharge=false;pushPresence(true);
